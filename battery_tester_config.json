@@ -1,0 +1,46 @@
+{
+  "application": {
+    "window_width": 1280,
+    "window_height": 960,
+    "theme": "superhero",
+    "data_dir": "data",
+    "open_config_on_startup": false
+  },
+  "battery": {
+    "parallel_cells": 4,
+    "cell_min_voltage": 3.0,
+    "cell_max_voltage": 4.2,
+    "complete_discharge_low_v": 2.8,
+    "complete_discharge_high_v": 2.8,
+    "complete_charge_low_v": 4.2,
+    "complete_charge_high_v": 4.2,
+    "nominal_capacity_ah": 13.6
+  },
+  "safety": {
+    "max_temperature_c": 55.0,
+    "charge_end_current_a": 0.05,
+    "zero_current_threshold_a": 0.05
+  },
+  "hardware": {
+    "adc_reference_voltage_v": 4.95
+  },
+  "timing": {
+    "arduino_reset_delay_s": 1.5,
+    "command_retry_delay_s": 0.5,
+    "max_command_retries": 3,
+    "cycle_transition_min_seconds": 600,
+    "sampling_period_ms": 500,
+    "relay_pulse_time_ms": 50,
+    "adc_samples": 20
+  },
+  "soc_ocv": {
+    "soc_step_fraction": 0.05,
+    "relax_window_s": 600,
+    "relax_threshold_v": 0.001,
+    "fallback_rest_s": 3600,
+    "cutoff_cell_voltage": 2.9
+  },
+  "calibration": {
+    "samples": 20
+  }
+}
