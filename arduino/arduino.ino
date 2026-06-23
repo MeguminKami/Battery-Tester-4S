@@ -10,13 +10,11 @@
  *   A0    = ACS712 current sensor
  *
  * Outputs:
- *   D4 = shared charge/discharge switch
- *        Hardware must be aligned with the selected test mode before start.
- *   D3 = unused legacy relay SET pulse
- *   D2 = unused legacy relay RESET pulse
+ *   D7 = Grove relay SIG1, discharge relay, active HIGH
+ *   D8 = Grove relay SIG2, charge relay, active HIGH
  *
  * Runtime configuration accepted from Python:
- *   CMIN, CMAX, ENDC, VREF, SAMP, ADCS, RLYP
+ *   CMIN, CMAX, ENDC, VREF, SAMP, ADCS
  *
  * Charge stop packets:
  *   MAX = maximum cell-voltage cutoff
@@ -79,7 +77,6 @@ const byte CHARGE_END_CONFIRM_SAMPLES = 3;
 
 // Timing configuration
 unsigned long samplingPeriodMs = 500;
-unsigned int relayPulseTimeMs = 50;
 int adcSamples = 8;
 
 // ========================================================================
@@ -89,9 +86,8 @@ int adcSamples = 8;
 const uint8_t PIN_TAP[SERIES_CELLS] = {A1, A2, A3, A4};
 const uint8_t PIN_TEMPERATURE = A5;
 const uint8_t PIN_CURRENT = A0;
-const uint8_t PIN_TEST_SWITCH = 4;   // Shared charge/discharge switch
-const uint8_t PIN_RELAY_SET = 3;     // Unused legacy relay ON
-const uint8_t PIN_RELAY_RESET = 2;   // Unused legacy relay OFF
+const uint8_t PIN_RELAY_DISCHARGE = 7;  // Grove SIG1
+const uint8_t PIN_RELAY_CHARGE = 8;     // Grove SIG2
 
 // ========================================================================
 // STATE MACHINE DEFINITION
@@ -124,6 +120,10 @@ byte lowChargeCurrentSamples = 0;
 unsigned long currentTime = 0;
 unsigned long lastSampleTime = 0;
 
+void enableChargeRelay();
+void enableDischargeRelay();
+void makeSafeIdle();
+
 // ========================================================================
 // SETUP
 // ========================================================================
@@ -132,19 +132,15 @@ void setup() {
   Serial.begin(9600);
   calculateVoltageDividerMultipliers();
 
-  pinMode(PIN_RELAY_SET, OUTPUT);
-  pinMode(PIN_RELAY_RESET, OUTPUT);
-  digitalWrite(PIN_RELAY_SET, HIGH);
-  digitalWrite(PIN_RELAY_RESET, HIGH);
+  pinMode(PIN_RELAY_DISCHARGE, OUTPUT);
+  pinMode(PIN_RELAY_CHARGE, OUTPUT);
+  makeSafeIdle();
 
   for (byte i = 0; i < SERIES_CELLS; i++) {
     pinMode(PIN_TAP[i], INPUT);
   }
   pinMode(PIN_CURRENT, INPUT);
   pinMode(PIN_TEMPERATURE, INPUT);
-
-  pinMode(PIN_TEST_SWITCH, OUTPUT);
-  digitalWrite(PIN_TEST_SWITCH, LOW);
 
   analogReference(DEFAULT);
 
@@ -156,16 +152,19 @@ void setup() {
 // RELAY / LOAD CONTROL
 // ========================================================================
 
-void enableTestSwitch() {
-  digitalWrite(PIN_TEST_SWITCH, HIGH);
+void enableChargeRelay() {
+  digitalWrite(PIN_RELAY_DISCHARGE, LOW);
+  digitalWrite(PIN_RELAY_CHARGE, HIGH);
 }
 
-void disableTestSwitch() {
-  digitalWrite(PIN_TEST_SWITCH, LOW);
+void enableDischargeRelay() {
+  digitalWrite(PIN_RELAY_CHARGE, LOW);
+  digitalWrite(PIN_RELAY_DISCHARGE, HIGH);
 }
 
 void makeSafeIdle() {
-  disableTestSwitch();
+  digitalWrite(PIN_RELAY_CHARGE, LOW);
+  digitalWrite(PIN_RELAY_DISCHARGE, LOW);
 }
 
 // ========================================================================
@@ -281,11 +280,6 @@ void applyConfig(const String& key, const String& valueText) {
     if (parsed >= 1 && parsed <= 64) {
       adcSamples = parsed;
     }
-  } else if (key == "RLYP") {
-    int parsed = valueText.toInt();
-    if (parsed >= 10 && parsed <= 1000) {
-      relayPulseTimeMs = parsed;
-    }
   }
 }
 
@@ -326,7 +320,7 @@ void processCommand() {
 
   else if (command == "STC") {
     readingEnabled = true;
-    enableTestSwitch();
+    enableChargeRelay();
     lowChargeCurrentSamples = 0;
     currentState = STATE_CHARGE;
     delay(100);
@@ -341,7 +335,7 @@ void processCommand() {
 
   else if (command == "STD") {
     readingEnabled = true;
-    enableTestSwitch();
+    enableDischargeRelay();
     currentState = STATE_DISCHARGE;
     delay(100);
   }

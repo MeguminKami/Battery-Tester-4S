@@ -103,7 +103,6 @@ class Config:
             "max_command_retries": 3,
             "cycle_transition_min_seconds": 600,
             "sampling_period_ms": 500,
-            "relay_pulse_time_ms": 50,
             "adc_samples": 8
         },
         "soc_ocv": {
@@ -138,6 +137,7 @@ class Config:
         cleaned.pop("arduino", None)
         cleaned.get("application", {}).pop("baud_rate", None)
         cleaned.get("battery", {}).pop("series_cells", None)
+        cleaned.get("timing", {}).pop("relay_pulse_time_ms", None)
         return cleaned
 
     @classmethod
@@ -228,7 +228,6 @@ class Config:
         cls.MAX_COMMAND_RETRIES = int(timing.get("max_command_retries", 3))
         cls.CYCLE_TRANSITION_MIN_SECONDS = int(timing.get("cycle_transition_min_seconds", 600))
         cls.SAMPLING_PERIOD_MS = int(timing.get("sampling_period_ms", 500))
-        cls.RELAY_PULSE_TIME_MS = int(timing.get("relay_pulse_time_ms", 50))
         cls.ADC_SAMPLES = int(timing.get("adc_samples", 8))
 
         cls.SOC_STEP_FRACTION = float(soc.get("soc_step_fraction", 0.05))
@@ -621,7 +620,6 @@ class App(tk.Tk):
             "timing.max_command_retries": "Maximum command retries",
             "timing.cycle_transition_min_seconds": "Minimum cycle transition time (s)",
             "timing.sampling_period_ms": "Sampling period (ms)",
-            "timing.relay_pulse_time_ms": "Relay pulse time (ms)",
             "timing.adc_samples": "ADC samples per reading",
             "soc_ocv.soc_step_fraction": "SOC-OCV step size (fraction)",
             "soc_ocv.relax_window_s": "OCV stability window (s)",
@@ -2516,7 +2514,6 @@ class App(tk.Tk):
             "VREF": Config.ADC_REFERENCE_VOLTAGE,
             "SAMP": Config.SAMPLING_PERIOD_MS,
             "ADCS": Config.ADC_SAMPLES,
-            "RLYP": Config.RELAY_PULSE_TIME_MS,
         }
 
         for key, value in packets.items():

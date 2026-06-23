@@ -1,105 +1,103 @@
 /*
-  Relay test for your exact schematic.
+  Grove 2-Channel SPDT Relay test.
 
-  Schematic:
-    D10 -> Q3 gate -> relay SET coil, relay pin 1
-    D11 -> Q2 gate -> relay RESET coil, relay pin 6
-    A0  -> relay output/contact sense
+  Wiring:
+    SIG1 -> Arduino D7 -> discharge relay
+    SIG2 -> Arduino D8 -> charge relay
 
   Logic:
-    P-MOSFET ON  = Arduino pin LOW
-    P-MOSFET OFF = Arduino pin HIGH
+    Grove relay input HIGH = relay active
+    Grove relay input LOW  = relay inactive
 */
 
-const byte SET_PIN   = 3;   // D10, Q3, relay SET
-const byte RESET_PIN = 2;   // D11, Q2, relay RESET
-const byte SENSE_PIN = A0;
+const byte DISCHARGE_PIN = 7;
+const byte CHARGE_PIN = 8;
 
-const unsigned long PULSE_MS = 200;
+enum RelayMode {
+  MODE_OFF,
+  MODE_CHARGE,
+  MODE_DISCHARGE
+};
+
+RelayMode currentMode = MODE_OFF;
+
+void setRelayMode(RelayMode mode);
+void toggleRelayMode();
+void printRelayMode();
 
 void setup() {
   Serial.begin(9600);
 
-  pinMode(SET_PIN, OUTPUT);
-  pinMode(RESET_PIN, OUTPUT);
+  pinMode(DISCHARGE_PIN, OUTPUT);
+  pinMode(CHARGE_PIN, OUTPUT);
+  setRelayMode(MODE_OFF);
 
-  // OFF state for P-MOSFETs
-  digitalWrite(SET_PIN, HIGH);
-  digitalWrite(RESET_PIN, HIGH);
-
-  delay(500);
-
-  Serial.println("Relay test ready.");
-  Serial.println("Type: on, off, toggle, read");
+  Serial.println("Grove relay test ready.");
+  Serial.println("Type: charge, discharge, off, toggle, read");
 }
 
 void loop() {
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    cmd.toLowerCase();
-
-    if (cmd == "on") {
-      relaySet();
-    }
-    else if (cmd == "off") {
-      relayReset();
-    }
-    else if (cmd == "toggle") {
-      relaySet();
-      delay(1000);
-      relayReset();
-    }
-    else if (cmd == "read") {
-      readA0();
-    }
-    else {
-      Serial.println("Unknown command. Use: on, off, toggle, read");
-    }
+  if (!Serial.available()) {
+    return;
   }
 
-  static unsigned long lastRead = 0;
-  if (millis() - lastRead >= 1000) {
-    lastRead = millis();
-    readA0();
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
+  cmd.toLowerCase();
+
+  if (cmd == "charge") {
+    setRelayMode(MODE_CHARGE);
+  } else if (cmd == "discharge") {
+    setRelayMode(MODE_DISCHARGE);
+  } else if (cmd == "off") {
+    setRelayMode(MODE_OFF);
+  } else if (cmd == "toggle") {
+    toggleRelayMode();
+  } else if (cmd == "read") {
+    printRelayMode();
+  } else {
+    Serial.println("Unknown command. Use: charge, discharge, off, toggle, read");
   }
 }
 
-void relaySet() {
-  Serial.println("SET / ON pulse");
+void setRelayMode(RelayMode mode) {
+  if (mode == MODE_CHARGE) {
+    digitalWrite(DISCHARGE_PIN, LOW);
+    digitalWrite(CHARGE_PIN, HIGH);
+  } else if (mode == MODE_DISCHARGE) {
+    digitalWrite(CHARGE_PIN, LOW);
+    digitalWrite(DISCHARGE_PIN, HIGH);
+  } else {
+    digitalWrite(CHARGE_PIN, LOW);
+    digitalWrite(DISCHARGE_PIN, LOW);
+  }
 
-  digitalWrite(RESET_PIN, HIGH);  // make sure reset is off
-  delay(5);
-
-  digitalWrite(SET_PIN, LOW);     // P-MOS ON
-  delay(PULSE_MS);
-  digitalWrite(SET_PIN, HIGH);    // P-MOS OFF
-
-  delay(50);
-  readA0();
+  currentMode = mode;
+  printRelayMode();
 }
 
-void relayReset() {
-  Serial.println("RESET / OFF pulse");
-
-  digitalWrite(SET_PIN, HIGH);    // make sure set is off
-  delay(5);
-
-  digitalWrite(RESET_PIN, LOW);   // P-MOS ON
-  delay(PULSE_MS);
-  digitalWrite(RESET_PIN, HIGH);  // P-MOS OFF
-
-  delay(50);
-  readA0();
+void toggleRelayMode() {
+  if (currentMode == MODE_CHARGE) {
+    setRelayMode(MODE_DISCHARGE);
+  } else if (currentMode == MODE_DISCHARGE) {
+    setRelayMode(MODE_OFF);
+  } else {
+    setRelayMode(MODE_CHARGE);
+  }
 }
 
-void readA0() {
-  int raw = analogRead(SENSE_PIN);
-  float voltage = raw * 5.0 / 1023.0;
+void printRelayMode() {
+  Serial.print("Charge D8 = ");
+  Serial.print(digitalRead(CHARGE_PIN) == HIGH ? "HIGH" : "LOW");
+  Serial.print(" | Discharge D7 = ");
+  Serial.print(digitalRead(DISCHARGE_PIN) == HIGH ? "HIGH" : "LOW");
+  Serial.print(" | Mode = ");
 
-  Serial.print("A0 raw = ");
-  Serial.print(raw);
-  Serial.print("   voltage = ");
-  Serial.print(voltage, 3);
-  Serial.println(" V");
+  if (currentMode == MODE_CHARGE) {
+    Serial.println("charge");
+  } else if (currentMode == MODE_DISCHARGE) {
+    Serial.println("discharge");
+  } else {
+    Serial.println("off");
+  }
 }

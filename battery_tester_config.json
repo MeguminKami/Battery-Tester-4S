@@ -30,7 +30,6 @@
     "max_command_retries": 3,
     "cycle_transition_min_seconds": 600,
     "sampling_period_ms": 500,
-    "relay_pulse_time_ms": 50,
     "adc_samples": 20
   },
   "soc_ocv": {
