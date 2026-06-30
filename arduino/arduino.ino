@@ -14,7 +14,7 @@
  *   D8 = Grove relay SIG2, charge relay, active HIGH
  *
  * Runtime configuration accepted from Python:
- *   CMIN, CMAX, ENDC, VREF, SAMP, ADCS
+ *   CMIN, CMAX, ENDC, VREFI, VREFA, SAMP, ADCS
  *
  * Charge stop packets:
  *   MAX = maximum cell-voltage cutoff
@@ -32,7 +32,8 @@ const byte SERIES_CELLS = 4;
 const float ADC_COUNTS = 1024.0;
 
 // Voltage reference calibration
-float vRef = 4.95;  // Measured 5V rail voltage
+float idleVRef = 4.94;    // Measured 5V rail with relays off
+float activeVRef = 4.90;  // Measured 5V rail while charge/discharge relay is active
 
 // Per-cell safety limits
 float cellMaxVoltage = 4.20;  // Maximum safe cell voltage
@@ -192,8 +193,15 @@ int stableAnalogRead(uint8_t pin) {
   return (int)(sum / samples);
 }
 
-float adcToVoltage(int raw) {
-  return (raw * vRef) / ADC_COUNTS;
+float selectedVRef() {
+  if (currentState == STATE_CHARGE || currentState == STATE_DISCHARGE) {
+    return activeVRef;
+  }
+  return idleVRef;
+}
+
+float adcToVoltage(int raw, float referenceVoltage) {
+  return (raw * referenceVoltage) / ADC_COUNTS;
 }
 
 void deriveCellVoltages() {
@@ -209,19 +217,21 @@ void readSensors() {
     return;
   }
 
+  float referenceVoltage = selectedVRef();
+
   for (byte i = 0; i < SERIES_CELLS; i++) {
     int rawTap = stableAnalogRead(PIN_TAP[i]);
-    tapVoltage[i] = adcToVoltage(rawTap) * voltageDividerMultiplier[i];
+    tapVoltage[i] = adcToVoltage(rawTap, referenceVoltage) * voltageDividerMultiplier[i];
     delay(5);
   }
   deriveCellVoltages();
 
   int rawCurrent = stableAnalogRead(PIN_CURRENT);
-  currentA = ((rawCurrent - currentOffsetRaw) * (vRef / ADC_COUNTS)) / currentSensitivity;
+  currentA = ((rawCurrent - currentOffsetRaw) * (referenceVoltage / ADC_COUNTS)) / currentSensitivity;
   delay(5);
 
   int rawTemp = stableAnalogRead(PIN_TEMPERATURE);
-  temperatureC = adcToVoltage(rawTemp) / 0.01;  // LM35-compatible 10 mV/°C
+  temperatureC = adcToVoltage(rawTemp, referenceVoltage) / 0.01;  // LM35-compatible 10 mV/°C
 
   newDataAvailable = true;
 }
@@ -266,9 +276,18 @@ void applyConfig(const String& key, const String& valueText) {
     cellMaxVoltage = value;
   } else if (key == "ENDC") {
     chargeEndCurrentA = value;
+  } else if (key == "VREFI") {
+    if (value >= 3.0f && value <= 5.5f) {
+      idleVRef = value;
+    }
+  } else if (key == "VREFA") {
+    if (value >= 3.0f && value <= 5.5f) {
+      activeVRef = value;
+    }
   } else if (key == "VREF") {
     if (value >= 3.0f && value <= 5.5f) {
-      vRef = value;
+      idleVRef = value;
+      activeVRef = value;
     }
   } else if (key == "SAMP") {
     long parsed = valueText.toInt();

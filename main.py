@@ -76,17 +76,12 @@ class Config:
             "window_width": DEFAULT_WINDOW_WIDTH,
             "window_height": DEFAULT_WINDOW_HEIGHT,
             "theme": "superhero",
-            "data_dir": "data",
-            "open_config_on_startup": True
+            "data_dir": "data"
         },
         "battery": {
             "parallel_cells": 4,
             "cell_min_voltage": 2.50,
             "cell_max_voltage": 4.20,
-            "complete_discharge_low_v": 2.90,
-            "complete_discharge_high_v": 3.05,
-            "complete_charge_low_v": 4.09,
-            "complete_charge_high_v": 4.11,
             "nominal_capacity_ah": 13.6
         },
         "safety": {
@@ -95,7 +90,8 @@ class Config:
             "zero_current_threshold_a": 0.05
         },
         "hardware": {
-            "adc_reference_voltage_v": 4.95
+            "idle_adc_reference_voltage_v": 4.94,
+            "active_adc_reference_voltage_v": 4.90
         },
         "timing": {
             "arduino_reset_delay_s": 1.0,
@@ -131,13 +127,24 @@ class Config:
         return base
 
     @classmethod
-    def _drop_obsolete_hardware_config(cls, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Ignore hardware settings that are fixed in the 4S Arduino firmware."""
+    def _clean_config(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrate legacy keys and drop settings that are no longer user-facing."""
         cleaned = json.loads(json.dumps(data))
         cleaned.pop("arduino", None)
         cleaned.get("application", {}).pop("baud_rate", None)
+        cleaned.get("application", {}).pop("open_config_on_startup", None)
         cleaned.get("battery", {}).pop("series_cells", None)
+        cleaned.get("battery", {}).pop("complete_discharge_low_v", None)
+        cleaned.get("battery", {}).pop("complete_discharge_high_v", None)
+        cleaned.get("battery", {}).pop("complete_charge_low_v", None)
+        cleaned.get("battery", {}).pop("complete_charge_high_v", None)
         cleaned.get("timing", {}).pop("relay_pulse_time_ms", None)
+
+        hardware = cleaned.setdefault("hardware", {})
+        legacy_vref = hardware.pop("adc_reference_voltage_v", None)
+        if legacy_vref is not None:
+            hardware.setdefault("idle_adc_reference_voltage_v", legacy_vref)
+            hardware.setdefault("active_adc_reference_voltage_v", legacy_vref)
         return cleaned
 
     @classmethod
@@ -159,8 +166,9 @@ class Config:
             try:
                 with open(cls.CONFIG_FILE, "r", encoding="utf-8") as file:
                     loaded = json.load(file)
-                loaded = cls._drop_obsolete_hardware_config(loaded) if isinstance(loaded, dict) else {}
+                loaded = cls._clean_config(loaded) if isinstance(loaded, dict) else {}
                 data = cls._deep_update(defaults, loaded)
+                cls._write_json(cls.CONFIG_FILE, data)
             except Exception:
                 data = defaults
                 cls._write_json(cls.CONFIG_FILE, data)
@@ -171,7 +179,7 @@ class Config:
     @classmethod
     def save_config(cls, data: Dict[str, Any]) -> None:
         defaults = cls._deepcopy_defaults()
-        merged = cls._deep_update(defaults, cls._drop_obsolete_hardware_config(data))
+        merged = cls._deep_update(defaults, cls._clean_config(data))
         cls._write_json(cls.CONFIG_FILE, merged)
         if not os.path.exists(cls.DEFAULT_CONFIG_FILE):
             cls._write_json(cls.DEFAULT_CONFIG_FILE, cls._deepcopy_defaults())
@@ -204,24 +212,20 @@ class Config:
         cls.WINDOW_HEIGHT = height
         cls.DEFAULT_THEME = str(app.get("theme", "superhero"))
         cls.DATA_DIR = str(app.get("data_dir", "data"))
-        cls.OPEN_CONFIG_ON_STARTUP = bool(app.get("open_config_on_startup", True))
 
         cls.PARALLEL_COUNT = int(battery.get("parallel_cells", 4))
         cls.CELL_MIN_VOLTAGE = float(battery.get("cell_min_voltage", 2.5))
         cls.CELL_MAX_VOLTAGE = float(battery.get("cell_max_voltage", 4.2))
         cls.BATTERY_MIN_VOLTAGE = cls.CELL_MIN_VOLTAGE * cls.CELL_COUNT
         cls.BATTERY_MAX_VOLTAGE = cls.CELL_MAX_VOLTAGE * cls.CELL_COUNT
-        cls.COMPLETE_DISCHARGE_LOW_V = float(battery.get("complete_discharge_low_v", 2.90))
-        cls.COMPLETE_DISCHARGE_HIGH_V = float(battery.get("complete_discharge_high_v", 3.05))
-        cls.COMPLETE_CHARGE_LOW_V = float(battery.get("complete_charge_low_v", 4.09))
-        cls.COMPLETE_CHARGE_HIGH_V = float(battery.get("complete_charge_high_v", 4.11))
         cls.NOMINAL_CAPACITY_AH = float(battery.get("nominal_capacity_ah", 13.6))
 
         cls.MAX_TEMPERATURE_C = float(safety.get("max_temperature_c", 80.0))
         cls.CHARGE_END_CURRENT_A = float(safety.get("charge_end_current_a", 0.05))
         cls.SOC_OCV_ZERO_CURRENT_THRESHOLD_A = float(safety.get("zero_current_threshold_a", 0.05))
 
-        cls.ADC_REFERENCE_VOLTAGE = float(hardware.get("adc_reference_voltage_v", 4.95))
+        cls.IDLE_ADC_REFERENCE_VOLTAGE = float(hardware.get("idle_adc_reference_voltage_v", 4.94))
+        cls.ACTIVE_ADC_REFERENCE_VOLTAGE = float(hardware.get("active_adc_reference_voltage_v", 4.90))
 
         cls.ARDUINO_RESET_DELAY = float(timing.get("arduino_reset_delay_s", 1.0))
         cls.COMMAND_RETRY_DELAY = float(timing.get("command_retry_delay_s", 0.5))
@@ -305,10 +309,6 @@ class App(tk.Tk):
         # Setup cleanup on window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # Open the configuration editor on startup if enabled.
-        if Config.OPEN_CONFIG_ON_STARTUP:
-            self.after(250, lambda: self.open_config_window(startup=True))
-
     def _apply_main_window_geometry(self):
         """Apply the configured fixed 4:3 main-window size."""
         self.minsize(1, 1)
@@ -360,11 +360,6 @@ class App(tk.Tk):
         self.pct_resting_period = 0
         self.pct_time = 0
         self.pct_state: Optional[str] = None
-
-        # Complete Dis/Charge Variables
-        self.complete_discharge_state = 'preparation'
-        self.complete_charge_state = 'preparation'
-        self.complete_elapsed_time = 0
 
         # Cycle Test Variables
         self.cycle_number = 0
@@ -602,19 +597,15 @@ class App(tk.Tk):
         labels = {
             "application.theme": "Visual theme",
             "application.data_dir": "Data folder",
-            "application.open_config_on_startup": "Open configuration on startup",
             "battery.parallel_cells": "Parallel cell count",
             "battery.cell_min_voltage": "Minimum cell voltage (V)",
             "battery.cell_max_voltage": "Maximum cell voltage (V)",
-            "battery.complete_discharge_low_v": "Complete discharge lower target (V/cell)",
-            "battery.complete_discharge_high_v": "Complete discharge upper target (V/cell)",
-            "battery.complete_charge_low_v": "Complete charge lower target (V/cell)",
-            "battery.complete_charge_high_v": "Complete charge upper target (V/cell)",
             "battery.nominal_capacity_ah": "Nominal pack capacity (Ah)",
             "safety.max_temperature_c": "Maximum safe temperature (C)",
             "safety.charge_end_current_a": "Charge end current (A)",
             "safety.zero_current_threshold_a": "Zero-current threshold (A)",
-            "hardware.adc_reference_voltage_v": "Arduino 5V reference measured value (V)",
+            "hardware.idle_adc_reference_voltage_v": "Arduino idle/rest 5V reference (V)",
+            "hardware.active_adc_reference_voltage_v": "Arduino active relay 5V reference (V)",
             "timing.arduino_reset_delay_s": "Arduino reset delay (s)",
             "timing.command_retry_delay_s": "Command retry delay (s)",
             "timing.max_command_retries": "Maximum command retries",
@@ -1097,7 +1088,7 @@ class App(tk.Tk):
                     self._soc_ocv_finalize(stop_reason)
                 elif test_state == "cycle":
                     self._save_cycle_partial_if_needed()
-                elif test_state not in ["complete_discharge", "complete_charge"]:
+                else:
                     self.save_data_to_csv()
                 self._test_saved = True
             except Exception as e:
@@ -2017,12 +2008,6 @@ class App(tk.Tk):
         elif self.state in ['pulsed_charge', 'pulsed_discharge']:
             self._handle_pulsed_state(code, value)
 
-        elif self.state == 'complete_discharge':
-            self._handle_complete_discharge_state(code, value)
-
-        elif self.state == 'complete_charge':
-            self._handle_complete_charge_state(code, value)
-
         elif self.state == 'cycle':
             self._handle_cycle_state(code, value)
 
@@ -2154,182 +2139,6 @@ class App(tk.Tk):
                 self.pct_time = current_time
                 self.status.set("Resting")
 
-    def _handle_complete_discharge_state(self, code: str, value: str):
-        """Handle complete discharge state"""
-        if code == 'VVV':
-            self.update_voltage(float(value))
-        elif code == 'III':
-            self.update_current(float(value))
-        elif code == 'TTT':
-            self.update_temperature(float(value))
-            if self.state != 'complete_discharge':
-                return
-        elif code in ['MAX', 'MIN', 'END']:
-            if code == 'END':
-                self.log(f"Charge-end current reached at {float(value):.3f} A")
-                reason = "Charge-end current cutoff reached during complete discharge"
-            else:
-                self.log(f"Cell voltage limit reached at {float(value):.2f} V")
-                reason = "Cell voltage cutoff reached during complete discharge"
-            self._complete_test(reason, completed=True, save_raw=False)
-            return
-
-        self.complete_elapsed_time = time.time() - self.start_time
-
-        if self.complete_discharge_state == 'preparation':
-            if self.complete_elapsed_time >= 10 * 60:
-                if self._min_cell_voltage() < Config.COMPLETE_DISCHARGE_LOW_V:
-                    self.arduino_write("STC\n".encode())
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'charge'
-                    self.status.set("Charging")
-                elif self._max_cell_voltage() > Config.COMPLETE_DISCHARGE_HIGH_V:
-                    self.arduino_write("STD\n".encode())
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'discharge'
-                    self.status.set("Discharging")
-                else:
-                    self.log("Voltage in target range, completing test")
-                    self._complete_test("Complete discharge target voltage reached", completed=True, save_raw=False)
-
-        elif self.complete_discharge_state == 'discharge':
-            if self.complete_elapsed_time >= 30:
-                self.arduino_write("IDL\n".encode())
-                self.start_time = time.time()
-                self.complete_discharge_state = 'rest'
-                self.status.set("Resting")
-
-        elif self.complete_discharge_state == 'charge':
-            if self.complete_elapsed_time >= 15:
-                self.arduino_write("IDL\n".encode())
-                self.start_time = time.time()
-                self.complete_discharge_state = 'rest'
-                self.status.set("Resting")
-
-        elif self.complete_discharge_state == 'rest':
-            if self.complete_elapsed_time >= 5 * 60:
-                if self._min_cell_voltage() < Config.COMPLETE_DISCHARGE_LOW_V:
-                    self.arduino_write("STC\n".encode())
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'charge'
-                    self.status.set("Charging")
-                elif self._max_cell_voltage() > Config.COMPLETE_DISCHARGE_HIGH_V:
-                    self.arduino_write("STD\n".encode())
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'discharge'
-                    self.status.set("Discharging")
-                else:
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'relaxation'
-                    self.status.set("Relaxation")
-
-        elif self.complete_discharge_state == 'relaxation':
-            if self.complete_elapsed_time >= 10 * 60:
-                if self._min_cell_voltage() < Config.COMPLETE_DISCHARGE_LOW_V:
-                    self.arduino_write("STC\n".encode())
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'charge'
-                    self.status.set("Charging")
-                elif self._max_cell_voltage() > Config.COMPLETE_DISCHARGE_HIGH_V:
-                    self.arduino_write("STD\n".encode())
-                    self.start_time = time.time()
-                    self.complete_discharge_state = 'discharge'
-                    self.status.set("Discharging")
-                else:
-                    self.log("Complete discharge finished successfully")
-                    self._complete_test("Complete discharge finished successfully", completed=True, save_raw=False)
-        else:
-            self.log(f"Unhandled complete discharge state: {self.complete_discharge_state}")
-            self._complete_test(f"Error: unhandled complete discharge state {self.complete_discharge_state}", completed=False, save_raw=False)
-
-    def _handle_complete_charge_state(self, code: str, value: str):
-        """Handle complete charge state"""
-        if code == 'VVV':
-            self.update_voltage(float(value))
-        elif code == 'III':
-            self.update_current(float(value))
-        elif code == 'TTT':
-            self.update_temperature(float(value))
-            if self.state != 'complete_charge':
-                return
-        elif code in ['MAX', 'MIN', 'END']:
-            if code == 'END':
-                self.log(f"Charge-end current reached at {float(value):.3f} A")
-                reason = "Charge-end current cutoff reached during complete charge"
-            else:
-                self.log(f"Cell voltage limit reached at {float(value):.2f} V")
-                reason = "Cell voltage cutoff reached during complete charge"
-            self._complete_test(reason, completed=True, save_raw=False)
-            return
-
-        self.complete_elapsed_time = time.time() - self.start_time
-
-        if self.complete_charge_state == 'preparation':
-            if self.complete_elapsed_time >= 10 * 60:
-                if self._min_cell_voltage() < Config.COMPLETE_CHARGE_LOW_V:
-                    self.arduino_write("STC\n".encode())
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'charge'
-                    self.status.set("Charging")
-                elif self._max_cell_voltage() > Config.COMPLETE_CHARGE_HIGH_V:
-                    self.arduino_write("STD\n".encode())
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'discharge'
-                    self.status.set("Discharging")
-                else:
-                    self.log("Voltage in target range, completing test")
-                    self._complete_test("Complete charge target voltage reached", completed=True, save_raw=False)
-
-        elif self.complete_charge_state == 'charge':
-            if self.complete_elapsed_time >= 30:
-                self.arduino_write("IDL\n".encode())
-                self.start_time = time.time()
-                self.complete_charge_state = 'rest'
-                self.status.set("Resting")
-
-        elif self.complete_charge_state == 'discharge':
-            if self.complete_elapsed_time >= 15:
-                self.arduino_write("IDL\n".encode())
-                self.start_time = time.time()
-                self.complete_charge_state = 'rest'
-                self.status.set("Resting")
-
-        elif self.complete_charge_state == 'rest':
-            if self.complete_elapsed_time >= 5 * 60:
-                if self._min_cell_voltage() < Config.COMPLETE_CHARGE_LOW_V:
-                    self.arduino_write("STC\n".encode())
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'charge'
-                    self.status.set("Charging")
-                elif self._max_cell_voltage() > Config.COMPLETE_CHARGE_HIGH_V:
-                    self.arduino_write("STD\n".encode())
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'discharge'
-                    self.status.set("Discharging")
-                else:
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'relaxation'
-                    self.status.set("Relaxation")
-
-        elif self.complete_charge_state == 'relaxation':
-            if self.complete_elapsed_time >= 10 * 60:
-                if self._min_cell_voltage() < Config.COMPLETE_CHARGE_LOW_V:
-                    self.arduino_write("STC\n".encode())
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'charge'
-                    self.status.set("Charging")
-                elif self._max_cell_voltage() > Config.COMPLETE_CHARGE_HIGH_V:
-                    self.arduino_write("STD\n".encode())
-                    self.start_time = time.time()
-                    self.complete_charge_state = 'discharge'
-                    self.status.set("Discharging")
-                else:
-                    self.log("Complete charge finished successfully")
-                    self._complete_test("Complete charge finished successfully", completed=True, save_raw=False)
-        else:
-            self.log(f"Unhandled complete charge state: {self.complete_charge_state}")
-            self._complete_test(f"Error: unhandled complete charge state {self.complete_charge_state}", completed=False, save_raw=False)
-            
     def _handle_cycle_state(self, code: str, value: str):
         """Handle cycle test state"""
         if self.cycle_state == 'rest':
@@ -2511,7 +2320,8 @@ class App(tk.Tk):
             "CMIN": Config.CELL_MIN_VOLTAGE,
             "CMAX": Config.CELL_MAX_VOLTAGE,
             "ENDC": Config.CHARGE_END_CURRENT_A,
-            "VREF": Config.ADC_REFERENCE_VOLTAGE,
+            "VREFI": Config.IDLE_ADC_REFERENCE_VOLTAGE,
+            "VREFA": Config.ACTIVE_ADC_REFERENCE_VOLTAGE,
             "SAMP": Config.SAMPLING_PERIOD_MS,
             "ADCS": Config.ADC_SAMPLES,
         }
@@ -2521,7 +2331,7 @@ class App(tk.Tk):
 
         self.log("Runtime configuration sent to Arduino")
 
-    def open_config_window(self, startup: bool = False):
+    def open_config_window(self):
         """Open the JSON-backed configuration editor."""
         if self.config_window is not None and self.config_window.winfo_exists():
             self.config_window.lift()
@@ -2533,12 +2343,9 @@ class App(tk.Tk):
         self.config_window.geometry("780x660")
         self.config_window.resizable(True, True)
 
-        title = "Battery Tester Configuration"
-        if startup:
-            title += " (opens on startup)"
         body = self._create_dialog_body(
             self.config_window,
-            title,
+            "Battery Tester Configuration",
             (
                 "Edit user-facing settings, then Save to apply and persist them. Lists use comma-separated values."
             )
@@ -2646,7 +2453,7 @@ class App(tk.Tk):
             self.log("Configuration restored to defaults")
             self.config_window.destroy()
             self.config_window = None
-            self.open_config_window(startup=False)
+            self.open_config_window()
 
         def on_close():
             self.config_window.destroy()
@@ -2865,8 +2672,6 @@ class App(tk.Tk):
             "Charge", 
             "Pulsed Charge", 
             "Pulsed Discharge",
-            "Complete Discharge",
-            "Complete Charge",
             "Cycle",
             "SOC-OCV Characterization"
         )
@@ -2893,8 +2698,6 @@ class App(tk.Tk):
             "Charge": "Increases voltage and current until maximum voltage is reached.",
             "Pulsed Charge": "Alternates between resting and charging at specified periods.",
             "Pulsed Discharge": "Alternates between resting and discharging at specified periods.",
-            "Complete Discharge": "Balances the 4S pack toward the configured per-cell discharge OCV window. No raw data collection.",
-            "Complete Charge": "Balances the 4S pack toward the configured per-cell charge OCV window. No raw data collection.",
             "Cycle": "Performs N charge/discharge cycles with pulsed steps every 10 cycles. Data saved per cycle.",
             "SOC-OCV Characterization": (
                 "Measures usable capacity, fully charges, then records OCV in 5% measured-capacity "
@@ -2921,7 +2724,7 @@ class App(tk.Tk):
         test_window.destroy()
 
         # Get filename for data collection tests
-        if selected_test not in ["Complete Discharge", "Complete Charge", "Cycle"]:
+        if selected_test != "Cycle":
             self.get_filename()
             if not self.filename:
                 self.log("Test cancelled - no filename provided")
@@ -2935,10 +2738,6 @@ class App(tk.Tk):
             self._run_charge_test()
         elif selected_test in ["Pulsed Charge", "Pulsed Discharge"]:
             self._run_pulsed_test(selected_test)
-        elif selected_test == "Complete Discharge":
-            self._run_complete_discharge_test()
-        elif selected_test == "Complete Charge":
-            self._run_complete_charge_test()
         elif selected_test == "Cycle":
             self._run_cycle_test()
         elif selected_test == "SOC-OCV Characterization":
@@ -3017,28 +2816,6 @@ class App(tk.Tk):
         self.state = 'pulsed_charge' if is_charge else 'pulsed_discharge'
         self.pct_state = 'resting'
         self.measuring = True
-
-    def _run_complete_discharge_test(self):
-        """Run complete discharge test"""
-        self._prepare_test_start()
-        self.arduino_write("IDL\n".encode())
-        self.complete_discharge_state = 'preparation'
-        self.start_time = time.time()
-        self.complete_elapsed_time = 0
-        self.state = "complete_discharge"
-        self.measuring = False
-        self.status.set("Preparing")
-
-    def _run_complete_charge_test(self):
-        """Run complete charge test"""
-        self._prepare_test_start()
-        self.arduino_write("IDL\n".encode())
-        self.complete_charge_state = 'preparation'
-        self.start_time = time.time()
-        self.complete_elapsed_time = 0
-        self.state = "complete_charge"
-        self.measuring = False
-        self.status.set("Preparing")
 
     def _run_cycle_test(self):
         """Run cycle test – first asks Create New or Continue."""

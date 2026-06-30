@@ -3,17 +3,12 @@
     "window_width": 1280,
     "window_height": 960,
     "theme": "superhero",
-    "data_dir": "data",
-    "open_config_on_startup": true
+    "data_dir": "data"
   },
   "battery": {
     "parallel_cells": 4,
     "cell_min_voltage": 2.5,
     "cell_max_voltage": 4.2,
-    "complete_discharge_low_v": 2.9,
-    "complete_discharge_high_v": 3.05,
-    "complete_charge_low_v": 4.09,
-    "complete_charge_high_v": 4.11,
     "nominal_capacity_ah": 13.6
   },
   "safety": {
@@ -22,7 +17,8 @@
     "zero_current_threshold_a": 0.05
   },
   "hardware": {
-    "adc_reference_voltage_v": 4.95
+    "idle_adc_reference_voltage_v": 4.94,
+    "active_adc_reference_voltage_v": 4.9
   },
   "timing": {
     "arduino_reset_delay_s": 1.0,
