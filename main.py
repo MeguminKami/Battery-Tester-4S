@@ -988,7 +988,7 @@ class App(tk.Tk):
             self.log(f"{self.running_test.get()} test stopped")
             self.running_test.set("No test running")
             self.status.set("Resting")
-            self.start_test_button.config(text="Start Test", bootstyle=PRIMARY)
+            self.start_test_button.config(text="Start Test", bootstyle=SUCCESS)
             self.state = 'off'
             self.reset_data_variables()
 
@@ -1101,7 +1101,7 @@ class App(tk.Tk):
         self.status.set(final_status)
         self.log(f"{test_name if test_name else 'Test'} finished: {stop_reason}")
         self.running_test.set("No test running")
-        self.start_test_button.config(text="Start Test", bootstyle=PRIMARY)
+        self.start_test_button.config(text="Start Test", bootstyle=SUCCESS)
         self._reset_cycle_display()
         self.state = 'connected' if self.connected else 'off'
         self.active_test_name = ""
